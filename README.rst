@@ -19,6 +19,13 @@ OTPManager's functionality includes:
 * For all steps involving OTP, monitor progress and terminating OTP if it
   freezes or encounters an error
 * Provide access to the OTP subprocess and information about it
+* Automatically shutting down OTP to free up resources when the script exits
+
+**Important caveats**:
+
+* OpenJDK 8 JRE must be used instead of OpenJDK 9 JRE. OpenJDK 9 produces an
+  obscure error with the `GeoTools <http://www.geotools.org/>`_ library when
+  building the graph.
 
 Simple usage, paired with `route_distances`:
 
@@ -42,5 +49,3 @@ Simple usage, paired with `route_distances`:
     manager.stop_otp()
 
 ..
-
-OTP will automatically be stopped when the script exits.
