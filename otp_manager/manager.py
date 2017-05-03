@@ -115,7 +115,8 @@ class OTPManager(object):
 
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
-              port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE):
+              port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
+              require_gtfs = False):
         """ Set up and start up an OTP instance
 
         Downloads the files necessary for and starts up and manages an instance
@@ -129,35 +130,56 @@ class OTPManager(object):
                 secure_port arguments and instead chooses the first available
                 port from port_allocation_range.
             port_allocation_range: A list of ports that OTP can use.
+            require_gtfs: A bool that describes if the presence of a GTFS feed
+                is required for OTP to be started. If False, OTP will start even
+                if no GTFS feeds could be found.
 
         Returns:
             True if OTP is started up successfully; False if not.
         """
 
+        downloaded_gtfs = "%s/%s/downloaded_gtfs" % (self.graph_root_dir,
+                                                     self.graph_name)
+        downloaded_osm = "%s/%s/downloaded_osm" % (self.graph_root_dir,
+                                                    self.graph_name)
+        built_graph = "%s/%s/built_graph" % (self.graph_root_dir,
+                                             self.graph_name)
+        output_dir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
+
         if (not os.path.isfile(self.otp_path)):
             print("Could not find OTP")
             return False
-
         if (not os.path.exists(self.graph_root_dir)):
             os.mkdir(self.graph_root_dir)
+        if (not os.path.exists(output_dir)):
+            os.mkdir(output_dir)
 
         atexit.register(self.stop_otp)
 
-        downloaded_gtfs = "%s/%s/downloaded_gtfs" % (self.graph_root_dir,
-                                                     self.graph_name)
-        built_graph = "%s/%s/built_graph" % (self.graph_root_dir,
-                                             self.graph_name)
+        print_wide("Downloading OSM from Overpass API")
+        if (not os.path.exists(downloaded_osm)):
+            if (self.__download_osm()):
+                with open(downloaded_osm, "w") as f:
+                    pass
+            else:
+                print("OSM downloading failed")
+                return False
+        else:
+            print("OSM already downloaded")
 
-        print_wide("Downloading OSM and GTFS files")
+        print_wide("Downloading GTFS feeds")
         if (not os.path.exists(downloaded_gtfs)):
-            if (self.__download_components()):
+            if (self.__download_gtfs()):
                 with open(downloaded_gtfs, "w") as f:
                     pass
             else:
-                print("OSM/GTFS downloading failed")
-                return False
+                print("GTFS downloading failed")
+                if (require_gtfs):
+                    return False
+                else:
+                    print("Resuming anyway")
         else:
-            print("OSM/GTFS already downloaded")
+            print("GTFS already downloaded")
 
         print("")
         print_wide("Building graph")
@@ -243,29 +265,46 @@ class OTPManager(object):
 
                 time.sleep(0.1)
 
-    def __download_components(self):
-        """ Initializes OTPManager class and returns True if OTP can be used
+    def __download_osm(self, output_dir):
+        """ Wrapper for bbox_dl.overpass_dl
+
+        Args:
+            output_dir: A string containing the path to the directory to store
+                the OSM file in.
 
         Returns:
-            True if the OSM file and at least one GTFS file was returned; False
-                otherwise.
+            True if the OSM file was downloaded; False if otherwise.
         """
 
-        output_dir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
-        current_time = datetime.datetime.now().isoformat()
-
-        if (not os.path.exists(output_dir)):
-            os.mkdir(output_dir)
-
-        osm = bbox_dl.overpass_dl("%s/map-%s.osm" % (output_dir, current_time),
-                                  *self.bbox)
-        print("")
-        gtfs = bbox_dl.transitland_dl("%s" % output_dir, *self.bbox)
+        osm = bbox_dl.overpass_dl(
+            "%s/map-%s.osm" % (
+                output_dir,
+                datetime.datetime.now().isoformat()
+            ),
+            *self.bbox
+        )
 
         print("Downloaded OSM: %s" % str(osm))
-        print("Downloaded GTFS: %s" % str(gtfs))
+        if (osm is not False):
+            return True
+        return False
 
-        if ((osm is not False) and (gtfs is not False)):
+    def __download_gtfs(self, output_dir):
+        """ Wrapper for bbox_dl.transitland_dl
+
+        Args:
+            output_dir: A string containing the path to the directory to store
+                the GTFS feeds in.
+
+        Returns:
+            True if at least one GTFS feed was downloaded; returns False
+            otherwise.
+        """
+
+        gtfs = bbox_dl.transitland_dl("%s" % output_dir, *self.bbox)
+
+        print("Downloaded GTFS: %s" % str(gtfs))
+        if (gtfs is not False):
             return True
         return False
 
