@@ -226,7 +226,7 @@ class OTPManager(object):
                     "kill_otp": A bool telling whether or not to kill the
                         running OTP instance when this listener fires.
                     "callback": A function that will be fired when this listener
-                        fires.
+                        fires. (OPTIONAL)
                 }
             show_output: A bool telling whether or not OTP output should be
                 written to STDOUT.
@@ -249,7 +249,8 @@ class OTPManager(object):
                 for listener in listeners:
                     if (listener["substring"] in line):
                         if ("kill_otp" in listener):
-                            self.stop_otp()
+                            if (listener["kill_otp"]):
+                                self.stop_otp()
                         if ("return_value" in listener):
                             return listener["return_value"]
                         if ("callback" in listener):
@@ -401,7 +402,7 @@ class OTPManager(object):
                 "kill_otp": False,
                 "return_value": True
             }
-        ])
+        ], timeout = False)
 
     def stop_otp(self, *dummy_args, **dummy_kwargs):
         """ Stop the running OTP instance """
