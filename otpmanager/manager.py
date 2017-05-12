@@ -91,7 +91,7 @@ class OTPManager(object):
 
     """
 
-    def __init__(self, graph_name, left, bottom, right, top,
+    def init__(self, graph_name, left, bottom, right, top,
                  otp_path = DEFAULT_OTP_PATH,
                  graph_root_dir = DEFAULT_GRAPH_ROOT_DIR):
         """ Initializes OTPManager class and returns True if OTP can be used
@@ -158,7 +158,7 @@ class OTPManager(object):
 
         print_wide("Downloading OSM from Overpass API")
         if (not os.path.exists(downloaded_osm)):
-            if (self.__download_osm()):
+            if (self.download_osm(output_dir)):
                 with open(downloaded_osm, "w") as f:
                     pass
             else:
@@ -169,7 +169,7 @@ class OTPManager(object):
 
         print_wide("Downloading GTFS feeds")
         if (not os.path.exists(downloaded_gtfs)):
-            if (self.__download_gtfs()):
+            if (self.download_gtfs(output_dir)):
                 with open(downloaded_gtfs, "w") as f:
                     pass
             else:
@@ -184,7 +184,7 @@ class OTPManager(object):
         print("")
         print_wide("Building graph")
         if (not os.path.exists(built_graph)):
-            if (self.__build_graph()):
+            if (self.build_graph()):
                 with open(built_graph, "w") as f:
                     pass
             else:
@@ -196,7 +196,7 @@ class OTPManager(object):
         print("")
         print_wide("Starting OTP")
         for i in range(3):
-            if (self.__start_otp(port, secure_port, dynamically_allocate_ports,
+            if (self.start_otp(port, secure_port, dynamically_allocate_ports,
                                  port_allocation_range)):
                 print("OTP ready on ports %d and %d\n" % (self.port,
                                                           self.secure_port))
@@ -265,7 +265,7 @@ class OTPManager(object):
 
                 time.sleep(0.1)
 
-    def __download_osm(self, output_dir):
+    def download_osm(self, output_dir):
         """ Wrapper for bbox_dl.overpass_dl
 
         Args:
@@ -289,7 +289,7 @@ class OTPManager(object):
             return True
         return False
 
-    def __download_gtfs(self, output_dir):
+    def download_gtfs(self, output_dir):
         """ Wrapper for bbox_dl.transitland_dl
 
         Args:
@@ -308,11 +308,11 @@ class OTPManager(object):
             return True
         return False
 
-    def __build_graph(self):
+    def build_graph(self):
         """ Attempts to build a graph with OTP
 
         Attempts to build a graph from the data downloaded by
-        self.__download_components
+        self.download_components
 
         Returns:
             True if successful; False if not.
@@ -343,12 +343,12 @@ class OTPManager(object):
             }
         ])
 
-    def __start_otp(self, port, secure_port, dynamically_allocate_ports,
+    def start_otp(self, port, secure_port, dynamically_allocate_ports,
                     port_allocation_range):
         """ Attempts to start an OTP instance
 
         Attempts to start up an OTP instance, using the graph built by
-        self.__build_graph.
+        self.build_graph.
 
         Args:
             port: The port to serve OTP on.

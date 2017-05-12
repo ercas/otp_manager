@@ -3,11 +3,11 @@
 import setuptools
 
 setuptools.setup(
-    name = "otp_manager",
-    version = "1.0.0",
+    name = "otpmanager",
+    version = "1.1.1",
     license = "Apache",
     description = "Manages the setup, startup, and monitoring of an"
                   "OpenTripPlanner (OTP) instance",
-    packages = ["otp_manager"],
+    packages = ["otpmanager"],
     install_requires = ["requests"]
 )
