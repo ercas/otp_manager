@@ -91,7 +91,7 @@ class OTPManager(object):
 
     """
 
-    def init__(self, graph_name, left, bottom, right, top,
+    def __init__(self, graph_name, left, bottom, right, top,
                  otp_path = DEFAULT_OTP_PATH,
                  graph_root_dir = DEFAULT_GRAPH_ROOT_DIR):
         """ Initializes OTPManager class and returns True if OTP can be used
