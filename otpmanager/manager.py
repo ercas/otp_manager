@@ -248,11 +248,11 @@ class OTPManager(object):
 
                 for listener in listeners:
                     if (listener["substring"] in line):
-                        if (listener["kill_otp"]):
+                        if ("kill_otp" in listener):
                             self.stop_otp()
-                        if (listener["return_value"]):
+                        if ("return_value" in listener):
                             return listener["return_value"]
-                        if (listener["callback"]):
+                        if ("callback" in listener):
                             listener["callback"]()
                         return
             else:
