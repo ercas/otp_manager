@@ -7,6 +7,7 @@ import os
 import signal
 import socket
 import subprocess
+import threading
 import time
 
 from . import bbox_dl
@@ -391,7 +392,9 @@ class OTPManager(object):
         )
 
         print("OTP PID: %d" % self.otp.pid)
-        return self.monitor_otp([
+
+        # First monitor is to get a return value from OTP
+        started = self.monitor_otp([
             {
                 "substring": "ERROR",
                 "kill_otp": True,
@@ -403,6 +406,23 @@ class OTPManager(object):
                 "return_value": True
             }
         ], timeout = False)
+
+        if (started):
+            # Second monitor is to soak up and print OTP's STDOUT
+            threading.Thread(target = self.monitor_otp, args = (
+                [
+                    {
+                        "substring": "asdfgh",
+                        "kill_otp": True,
+                        "return_value": False
+                    }
+                ],
+                True, # show_output
+                False # timeout
+            )).start()
+
+            return True
+        return False
 
     def stop_otp(self, *dummy_args, **dummy_kwargs):
         """ Stop the running OTP instance """
