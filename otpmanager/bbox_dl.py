@@ -33,7 +33,10 @@ def save_file(url, output_path, live_output = True, overwrite = OVERWRITE):
     """
 
     print(url)
-    response = requests.get(url, stream = True)
+    try:
+        response = requests.get(url, stream = True)
+    except:
+        return False
     if (response.status_code == 200):
 
         # urls with a forward slash at the end might not have a valid file name
@@ -144,8 +147,7 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
                             "output_path": "%s/%s" % (
                                 output_directory,
                                 feed["url"].split("/")[-1]
-                            ),
-                            "live_output": False
+                            )
                         }
                     } for feed in data["feeds"]]
 
