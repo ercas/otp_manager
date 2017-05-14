@@ -115,8 +115,8 @@ class OTPManager(object):
 
         """
 
-        self.graph_root_dir = graph_root_dir
-        self.graph_name = graph_name
+        self.graph_root_dir = remove_illegal_characters(graph_root_dir)
+        self.graph_name = remove_illegal_characters(graph_name)
         self.bbox = (left, bottom, right, top)
         self.otp_path = otp_path
 
