@@ -15,6 +15,9 @@ from . import bbox_dl
 # Array containing ports that can be used by this script
 DEFAULT_PORT_ALLOCATION_RANGE = range(8100, 8200)
 
+# Characters to be replaced by "_"
+ILLEGAL_CHARACTERS = ["/", "(", ")", "?"]
+
 DEFAULT_PORT = 8080
 DEFAULT_SECURE_PORT = 8081
 
@@ -27,6 +30,11 @@ DEFAULT_OTP_PATH = "otp-1.1.0-shaded.jar"
 # OTP: How long between STDOUT messages during startup before the OTP is
 # considered to be dead
 DEFAULT_TIMEOUT = 600
+
+def remove_illegal_characters(string):
+    for character in ILLEGAL_CHARACTERS:
+        string = string.replace(character, "_")
+    return string
 
 def port_available(port):
     """ Find if a port is in use
@@ -334,7 +342,7 @@ class OTPManager(object):
         print("OTP PID: %d" % self.otp.pid)
         return self.monitor_otp([
             {
-                "substring": "ERROR",
+                "substring": "Exception",
                 "kill_otp": True,
                 "return_value": False
             },
@@ -396,7 +404,7 @@ class OTPManager(object):
         # First monitor is to get a return value from OTP
         started = self.monitor_otp([
             {
-                "substring": "ERROR",
+                "substring": "Exception",
                 "kill_otp": True,
                 "return_value": False
             },
@@ -412,7 +420,7 @@ class OTPManager(object):
             threading.Thread(target = self.monitor_otp, args = (
                 [
                     {
-                        "substring": "asdfgh",
+                        "substring": "Exception",
                         "kill_otp": True,
                         "return_value": False
                     }

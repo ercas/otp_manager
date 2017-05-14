@@ -36,6 +36,7 @@ def save_file(url, output_path, live_output = True, overwrite = OVERWRITE):
     try:
         response = requests.get(url, stream = True)
     except:
+        print("=> Download failed: %s" % url)
         return False
     if (response.status_code == 200):
 
@@ -148,7 +149,8 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
                                 output_directory,
                                 feed["url"].split("/")[-1]
                             )
-                        }
+                        },
+                        "live_output": False
                     } for feed in data["feeds"]]
 
                     pool = multiprocessing.Pool(THREADS)
