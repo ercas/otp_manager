@@ -16,7 +16,7 @@ from . import bbox_dl
 DEFAULT_PORT_ALLOCATION_RANGE = range(8100, 8200)
 
 # Characters to be replaced by "_"
-ILLEGAL_CHARACTERS = ["/", "(", ")", "?"]
+ILLEGAL_CHARACTERS = ["(", ")", "?"]
 
 DEFAULT_PORT = 8080
 DEFAULT_SECURE_PORT = 8081
