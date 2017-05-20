@@ -16,7 +16,8 @@ OVERWRITE = True
 # multiprocessing)
 THREADS = 4
 
-def save_file(url, output_path, live_output = True, overwrite = OVERWRITE):
+def save_file(url, output_path, live_output = True, overwrite = OVERWRITE,
+              desired_extension = None):
     """ Save a URL to a file
 
     Args:
@@ -78,6 +79,17 @@ def save_file(url, output_path, live_output = True, overwrite = OVERWRITE):
                                                      f.tell()/1024))
                 sys.stdout.flush()
             print("")
+
+            if (desired_extension is not None):
+                if (not output_path.endswith(desired_extension)):
+                    desired_output_path = "%s.%s" % (
+                        output_path, desired_extension
+                    )
+                    print("Renaming: %s -> %s" % (
+                        output_path, desired_output_path
+                    ))
+                    os.rename(output_path, desired_output_path)
+
             return True
         except Exception as err:
             print("")
@@ -150,7 +162,8 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
                                 feed["url"].split("/")[-1]
                             )
                         },
-                        "live_output": False
+                        "live_output": False,
+                        "desired_extension": "zip"
                     } for feed in data["feeds"]]
 
                     pool = multiprocessing.Pool(THREADS)
@@ -164,23 +177,18 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
                 # Single threaded
                 else:
                     for feed in data["feeds"]:
-                        success = save_file(feed["url"], "%s/%s" % (
-                            output_directory,
-                            feed["url"].split("/")[-1]
-                        ))
+                        success = save_file(
+                            url = feed["url"],
+                            output_path = "%s/%s" % (
+                                output_directory,
+                                feed["url"].split("/")[-1]
+                            ),
+                            desired_extension = "zip"
+                        )
                         if (success):
                             downloaded_feeds += 1
 
             if (downloaded_feeds > 0):
-                for f in os.listdir(output_directory):
-                    if ((f[-4:] != ".zip") and (f[-4:] != ".osm")):
-                        print("Renaming: %s/%s -> %s/%s.zip" % (
-                            output_directory, f, output_directory, f
-                        ))
-                        os.rename(
-                            "%s/%s" % (output_directory, f),
-                            "%s/%s.zip" % (output_directory, f)
-                        )
                 return downloaded_feeds
 
     print("=> Failed")
