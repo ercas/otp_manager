@@ -3,6 +3,7 @@
 import atexit
 import contextlib
 import datetime
+import json
 import os
 import signal
 import socket
@@ -93,6 +94,8 @@ class OTPManager(object):
             topmost coordinates.
         otp: The process running OpenTripPlanner, if self.start runs and
             succeeds.
+        running: A bool that tells whether or not OTPManager is running. If
+            False, all monitor threads will terminate.
         port: The port that OpenTripPlanner is serving HTTP on, if
             self.start runs and succeeds.
         secure_port: The port that OpenTripPlanner is serving HTTPS on, if
@@ -121,6 +124,7 @@ class OTPManager(object):
         self.otp_path = otp_path
 
         self.otp = None
+        self.running = False
 
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
@@ -146,6 +150,8 @@ class OTPManager(object):
         Returns:
             True if OTP is started up successfully; False if not.
         """
+
+        self.running = True
 
         downloaded_gtfs = "%s/%s/downloaded_gtfs" % (self.graph_root_dir,
                                                      self.graph_name)
@@ -191,6 +197,7 @@ class OTPManager(object):
             print("GTFS already downloaded")
 
         print("")
+
         print_wide("Building graph")
         if (not os.path.exists(built_graph)):
             if (self.build_graph()):
@@ -203,6 +210,7 @@ class OTPManager(object):
             print("Graph already built")
 
         print("")
+
         print_wide("Starting OTP")
         for i in range(3):
             if (self.start_otp(port, secure_port, dynamically_allocate_ports,
@@ -246,12 +254,15 @@ class OTPManager(object):
             False on timeout or the value of listener["callback"] otherwise.
 
         """
+
         last_activity = time.time()
-        while True:
+
+        while (self.running):
             line = self.otp.stdout.readline().decode().rstrip()
 
             if (len(line) > 0):
                 last_activity = time.time()
+
                 if (show_output):
                     print("OTP: %s" % line)
 
@@ -265,6 +276,7 @@ class OTPManager(object):
                         if ("callback" in listener):
                             listener["callback"]()
                         return
+
             else:
                 if (timeout is not False):
                     if (time.time() - last_activity > timeout):
@@ -274,6 +286,8 @@ class OTPManager(object):
                         return False
 
                 time.sleep(0.1)
+
+        print("Terminating monitor loop...")
 
     def download_osm(self, output_dir):
         """ Wrapper for bbox_dl.overpass_dl
@@ -293,10 +307,11 @@ class OTPManager(object):
             ),
             *self.bbox
         )
-
         print("Downloaded OSM: %s" % str(osm))
+
         if (osm is not False):
             return True
+
         return False
 
     def download_gtfs(self, output_dir):
@@ -312,10 +327,11 @@ class OTPManager(object):
         """
 
         gtfs = bbox_dl.transitland_dl("%s" % output_dir, *self.bbox)
-
         print("Downloaded GTFS: %s" % str(gtfs))
+
         if (gtfs is not False):
             return True
+
         return False
 
     def build_graph(self):
@@ -336,13 +352,13 @@ class OTPManager(object):
                 "--build", "%s/%s" % (self.graph_root_dir, self.graph_name)
             ],
             stdout = subprocess.PIPE,
-            stderr = subprocess.PIPE
+            stderr = subprocess.STDOUT
         )
-
         print("OTP PID: %d" % self.otp.pid)
+
         return self.monitor_otp([
             {
-                "substring": "Exception",
+                "substring": "Exception in thread",
                 "kill_otp": True,
                 "return_value": False
             },
@@ -396,15 +412,15 @@ class OTPManager(object):
                 "--inMemory"
             ],
             stdout = subprocess.PIPE,
-            stderr = subprocess.PIPE
+            stderr = subprocess.STDOUT
         )
-
         print("OTP PID: %d" % self.otp.pid)
 
-        # First monitor is to get a return value from OTP
+        # First monitor is to get a return value from OTP and indicate that it
+        # started up successfully
         started = self.monitor_otp([
             {
-                "substring": "Exception",
+                "substring": "Exception in thread",
                 "kill_otp": True,
                 "return_value": False
             },
@@ -417,19 +433,20 @@ class OTPManager(object):
 
         if (started):
             # Second monitor is to soak up and print OTP's STDOUT
-            threading.Thread(target = self.monitor_otp, args = (
+            self.monitor = threading.Thread(target = self.monitor_otp, args = (
                 [
                     {
-                        "substring": "Exception",
+                        "substring": "Exception in thread",
                         "kill_otp": True,
                         "return_value": False
                     }
                 ],
                 True, # show_output
                 False # timeout
-            )).start()
-
+            ))
+            self.monitor.start()
             return True
+
         return False
 
     def stop_otp(self, *dummy_args, **dummy_kwargs):
@@ -439,5 +456,6 @@ class OTPManager(object):
             print("Killing OTP process %d" % self.otp.pid)
             self.otp.kill()
             self.otp = None
+            self.running = False
         else:
             print("No running OTP process to kill")
