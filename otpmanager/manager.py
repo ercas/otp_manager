@@ -48,6 +48,7 @@ def port_available(port):
     Returns:
         True if the port is available; False if it is in use.
     """
+
     with contextlib.closing(socket.socket(socket.AF_INET, socket.SOCK_STREAM)) as sock:
         if sock.connect_ex(("localhost", port)) == 0:
             return False
@@ -93,14 +94,11 @@ class OTPManager(object):
         bbox: A tuple containing the leftmost, bottommost, rightmost, and
             topmost coordinates.
         otp: The process running OpenTripPlanner, if self.start runs and
-            succeeds.
-        running: A bool that tells whether or not OTPManager is running. If
-            False, all monitor threads will terminate.
+            succeeds; None otherwise.
         port: The port that OpenTripPlanner is serving HTTP on, if
             self.start runs and succeeds.
         secure_port: The port that OpenTripPlanner is serving HTTPS on, if
             self.start runs and succeeds.
-
     """
 
     def __init__(self, graph_name, left, bottom, right, top,
@@ -115,7 +113,8 @@ class OTPManager(object):
             bottom: A floating point of the bottommost coordinate.
             right: A floating point of the rightmost coordinate.
             top: A floating point of the topmost coordinate.
-
+            otp_path: The path to the OpenTripPlanner jar.
+            graph_root_dir: The path to store all graphs in.
         """
 
         self.graph_root_dir = remove_illegal_characters(graph_root_dir)
@@ -124,7 +123,6 @@ class OTPManager(object):
         self.otp_path = otp_path
 
         self.otp = None
-        self.running = False
 
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
@@ -150,8 +148,6 @@ class OTPManager(object):
         Returns:
             True if OTP is started up successfully; False if not.
         """
-
-        self.running = True
 
         downloaded_gtfs = "%s/%s/downloaded_gtfs" % (self.graph_root_dir,
                                                      self.graph_name)
@@ -200,7 +196,7 @@ class OTPManager(object):
 
         print_wide("Building graph")
         if (not os.path.exists(built_graph)):
-            if (self.build_graph()):
+            if (self.build_graph(output_dir)):
                 with open(built_graph, "w") as f:
                     pass
             else:
@@ -257,7 +253,7 @@ class OTPManager(object):
 
         last_activity = time.time()
 
-        while (self.running):
+        while (self.otp is not None):
             line = self.otp.stdout.readline().decode().rstrip()
 
             if (len(line) > 0):
@@ -280,8 +276,8 @@ class OTPManager(object):
             else:
                 if (timeout is not False):
                     if (time.time() - last_activity > timeout):
-                        print("\nKilling OTP; no stdout activity in last %d"
-                              "seconds" % timeout)
+                        print("\nKilling OTP; no stdout/stderr activity in last"
+                              "%d seconds" % timeout)
                         self.stop_otp()
                         return False
 
@@ -334,22 +330,24 @@ class OTPManager(object):
 
         return False
 
-    def build_graph(self):
+    def build_graph(self, output_dir):
         """ Attempts to build a graph with OTP
 
         Attempts to build a graph from the data downloaded by
         self.download_components
 
+        Args:
+            output_dir: The directory containing the graph data.
+
         Returns:
             True if successful; False if not.
-
         """
 
         self.otp = subprocess.Popen(
             [
                 "java", "-jar", self.otp_path,
                 "--basePath", ".",
-                "--build", "%s/%s" % (self.graph_root_dir, self.graph_name)
+                "--build", output_dir
             ],
             stdout = subprocess.PIPE,
             stderr = subprocess.STDOUT
@@ -456,6 +454,5 @@ class OTPManager(object):
             print("Killing OTP process %d" % self.otp.pid)
             self.otp.kill()
             self.otp = None
-            self.running = False
         else:
             print("No running OTP process to kill")
