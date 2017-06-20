@@ -4,7 +4,7 @@ import setuptools
 
 setuptools.setup(
     name = "otpmanager",
-    version = "1.3.0",
+    version = "1.4.0",
     license = "Apache",
     description = "Manages the setup, startup, and monitoring of an"
                   "OpenTripPlanner (OTP) instance",

@@ -127,7 +127,7 @@ class OTPManager(object):
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
               port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
-              require_gtfs = False):
+              ways_only = True, min_osm_size = 10e3, require_gtfs = False):
         """ Set up and start up an OTP instance
 
         Downloads the files necessary for and starts up and manages an instance
@@ -141,6 +141,11 @@ class OTPManager(object):
                 secure_port arguments and instead chooses the first available
                 port from port_allocation_range.
             port_allocation_range: A list of ports that OTP can use.
+            ways_only: A bool describing whether or not to download an OSM file
+                containing only nodes used in ways, a.k.a no points of interest
+            min_osm_size: A number describing the minimum expected size of an
+                OSM file. The OSM download will be considered failed if the OSM
+                file is less than this many bytes in size.
             require_gtfs: A bool that describes if the presence of a GTFS feed
                 is required for OTP to be started. If False, OTP will start even
                 if no GTFS feeds could be found.
@@ -169,7 +174,9 @@ class OTPManager(object):
 
         print_wide("Downloading OSM from Overpass API")
         if (not os.path.exists(downloaded_osm)):
-            if (self.download_osm(output_dir)):
+            if (self.download_osm(output_dir,
+                                  ways_only = ways_only,
+                                  min_size = min_osm_size)):
                 with open(downloaded_osm, "w") as f:
                     pass
             else:
@@ -238,16 +245,17 @@ class OTPManager(object):
                         fires.
                     "kill_otp": A bool telling whether or not to kill the
                         running OTP instance when this listener fires.
-                    "callback": A function that will be fired when this listener
-                        fires. (OPTIONAL)
+                    "callback": A function that will be fired when this
+                        listener fires. (OPTIONAL)
                 }
             show_output: A bool telling whether or not OTP output should be
                 written to STDOUT.
             timeout: OTP will be killed if it produces no output in this amount
-                of time. This can be set to False if there should be no timeout.
+            of time. This can be set to False if there should be no timeout.
 
         Returns:
-            False on timeout or the value of listener["callback"] otherwise.
+            False on timeout or the value of listener["return_value"]
+            otherwise.
 
         """
 
@@ -285,7 +293,7 @@ class OTPManager(object):
 
         print("Terminating monitor loop...")
 
-    def download_osm(self, output_dir):
+    def download_osm(self, output_dir, **overpass_dl_kwargs):
         """ Wrapper for bbox_dl.overpass_dl
 
         Args:
@@ -301,7 +309,8 @@ class OTPManager(object):
                 output_dir,
                 datetime.datetime.now().isoformat()
             ),
-            *self.bbox
+            *self.bbox,
+            **overpass_dl_kwargs
         )
         print("Downloaded OSM: %s" % str(osm))
 

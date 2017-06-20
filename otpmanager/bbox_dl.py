@@ -121,6 +121,8 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
         bottom: A float representing the bottommost part of the bounding box.
         right: A float representing the rightmost part of the bounding box.
         top: A float representing the topmost part of the bounding box.
+        dryrun: A bool describing whether or not the URL should be printed but
+            not downloaded. Nothing is returned if dryrun is True.
 
     Returns:
         The number of GTFS feeds downloaded, or False if none were.
@@ -194,7 +196,8 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
     print("=> Failed")
     return False
 
-def overpass_dl(output_path, left, bottom, right, top, dryrun = False):
+def overpass_dl(output_path, left, bottom, right, top, ways_only = False,
+                min_size = 10e3, dryrun = False):
     """ Simple interface for the OpenStreetMap Overpass API
 
     Constructs and download an exported subset of the OSM planet using the
@@ -207,14 +210,30 @@ def overpass_dl(output_path, left, bottom, right, top, dryrun = False):
         bottom: A float representing the bottommost part of the bounding box.
         right: A float representing the rightmost part of the bounding box.
         top: A float representing the topmost part of the bounding box.
+        ways_only: A bool describing whether or not to download an OSM file
+            containing only nodes used in ways, a.k.a no points of interest
+        min_size: A number describing the minimum expected size of an OSM file.
+            The OSM download will be considered failed if the OSM file is less
+            than this many bytes in size.
+        dryrun: A bool describing whether or not the URL should be printed but
+            not downloaded. Nothing is returned if dryrun is True.
 
     Returns:
         True if the .osm was successfully downloaded; False if it was not.
     """
 
-    url = "https://overpass-api.de/api/map?bbox=%f,%f,%f,%f" % (left, bottom,
-                                                                right, top)
+    if (ways_only):
+        url = ("https://overpass-api.de/api/interpreter?data=way[\"highway\"]"
+               "(%f,%f,%f,%f);(._;>;);out;" % (bottom, left, top, right))
+    else:
+        url = ("https://overpass-api.de/api/map?bbox=%f,%f,%f,%f" % 
+               (left,bottom,right,top))
     if (dryrun):
         print(url)
     else:
-        return save_file(url, output_path)
+        if (save_file(url, output_path)):
+            if (os.stat(output_path).st_size < min_size):
+                print("Downloaded OSM file is smaller than %s bytes" % min_size)
+                return False
+            else:
+                return True

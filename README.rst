@@ -44,11 +44,24 @@ Simple usage, paired with `route_distances`:
     # dynamically allocated, so we can't be sure what port it is. This behaviour
     # can be overridden if necessary.
     router = route_distances.OTPDistances("localhost:%d" % manager.port)
-    print(router.calculate(-71.08930, 42.33877, -71.07743, 42.34954, "walk"))
+    print(router.route(-71.08930, 42.33877, -71.07743, 42.34954, "walk"))
 
     manager.stop_otp()
 
 ..
+
+By default, OTPManager.start() downloads an OSM file containing only nodes used
+in ways (no points of interest), and considers a download "failed" if it its
+size is less than 10kb. This is because the Overpass API will return a valid
+file containing only an error message and no OSM contents if an API call fails.
+This behaviour can be toggled by passing `ways_only = False` and `min_osm_size
+= NUMBER` to OTPManager.start().
+
+Note that this is in contrast to `otpmanager.bbox_dl.overpass_dl()`'s default
+behaviour when run on its own, which is to download everything within a
+bounding box. For large routing operations, this is not possible because of
+the amount of data in a bounding box may exceed what the Overpass API can
+return.
 
 For more fine-grained control, ``otpmanager`` also provides the following
 internal methods that each control a portion of the OTP startup process:
