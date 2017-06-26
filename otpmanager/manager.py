@@ -32,6 +32,9 @@ DEFAULT_OTP_PATH = "otp-1.1.0-shaded.jar"
 # considered to be dead
 DEFAULT_TIMEOUT = 600
 
+def log_name(label):
+    return "%s_%s.log" % (label, datetime.datetime.now().isoformat())
+
 def remove_illegal_characters(string):
     for character in ILLEGAL_CHARACTERS:
         string = string.replace(character, "_")
@@ -95,6 +98,9 @@ class OTPManager(object):
             topmost coordinates.
         otp: The process running OpenTripPlanner, if self.start runs and
             succeeds; None otherwise.
+        otp_output: The current file being used to soak up OpenTripPlanner's
+            STDOUT and STDERR, or None if OpenTripPlanner is not currently
+            running.
         port: The port that OpenTripPlanner is serving HTTP on, if
             self.start runs and succeeds.
         secure_port: The port that OpenTripPlanner is serving HTTPS on, if
@@ -123,6 +129,7 @@ class OTPManager(object):
         self.otp_path = otp_path
 
         self.otp = None
+        self.otp_output = None
 
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
@@ -261,37 +268,39 @@ class OTPManager(object):
 
         last_activity = time.time()
 
-        while (self.otp is not None):
-            line = self.otp.stdout.readline().decode().rstrip()
+        with open(self.otp_output, "r") as otp_output:
+            while (self.otp is not None):
+                line = otp_output.readline().rstrip()
 
-            if (len(line) > 0):
-                last_activity = time.time()
+                if (len(line) > 0):
+                    last_activity = time.time()
 
-                if (show_output):
-                    print("OTP: %s" % line)
+                    if (show_output):
+                        print("OTP: %s" % line)
 
-                for listener in listeners:
-                    if (listener["substring"] in line):
-                        if ("kill_otp" in listener):
-                            if (listener["kill_otp"]):
-                                self.stop_otp()
-                        if ("return_value" in listener):
-                            return listener["return_value"]
-                        if ("callback" in listener):
-                            listener["callback"]()
-                        return
+                    for listener in listeners:
+                        if (listener["substring"] in line):
+                            if ("kill_otp" in listener):
+                                if (listener["kill_otp"]):
+                                    time.sleep(1)
+                                    self.stop_otp()
+                            if ("return_value" in listener):
+                                return listener["return_value"]
+                            if ("callback" in listener):
+                                listener["callback"]()
+                            return
 
-            else:
-                if (timeout is not False):
-                    if (time.time() - last_activity > timeout):
-                        print("\nKilling OTP; no stdout/stderr activity in last"
-                              "%d seconds" % timeout)
-                        self.stop_otp()
-                        return False
+                else:
+                    if (timeout is not False):
+                        if (time.time() - last_activity > timeout):
+                            print("\nKilling OTP; no stdout/stderr activity "
+                                  "in last %d seconds" % timeout)
+                            self.stop_otp()
+                            return False
 
-                time.sleep(0.1)
+                    time.sleep(0.1)
 
-        print("Terminating monitor loop...")
+            print("Terminating monitor loop...")
 
     def download_osm(self, output_dir, **overpass_dl_kwargs):
         """ Wrapper for bbox_dl.overpass_dl
@@ -352,27 +361,33 @@ class OTPManager(object):
             True if successful; False if not.
         """
 
+        self.otp_output = log_name("otpmanager_graph_build")
+        fp = open(self.otp_output, "w")
+
         self.otp = subprocess.Popen(
             [
                 "java", "-jar", self.otp_path,
                 "--basePath", ".",
                 "--build", output_dir
             ],
-            stdout = subprocess.PIPE,
-            stderr = subprocess.STDOUT
+            stdout = fp,
+            stderr = fp
         )
+
         print("OTP PID: %d" % self.otp.pid)
 
         return self.monitor_otp([
             {
                 "substring": "Exception in thread",
                 "kill_otp": True,
-                "return_value": False
+                "return_value": False,
+                "callback": fp.close()
             },
             {
                 "substring": "Graph written",
                 "kill_otp": True,
-                "return_value": True
+                "return_value": True,
+                "callback": fp.close
             }
         ])
 
@@ -409,6 +424,9 @@ class OTPManager(object):
             self.port = port,
             self.secure_port = secure_port
 
+        self.otp_output = log_name("otpmanager")
+        fp = open(self.otp_output, "w")
+
         self.otp = subprocess.Popen(
             [
                 "java", "-jar", self.otp_path,
@@ -418,8 +436,8 @@ class OTPManager(object):
                 "--securePort", str(self.secure_port),
                 "--inMemory"
             ],
-            stdout = subprocess.PIPE,
-            stderr = subprocess.STDOUT
+            stdout = fp,
+            stderr = fp
         )
         print("OTP PID: %d" % self.otp.pid)
 
@@ -429,15 +447,18 @@ class OTPManager(object):
             {
                 "substring": "Exception in thread",
                 "kill_otp": True,
-                "return_value": False
+                "return_value": False,
+                "callback": fp.close
             },
             {
                 "substring": "Grizzly server running",
                 "kill_otp": False,
-                "return_value": True
+                "return_value": True,
+                "callback": fp.close
             }
         ], timeout = False)
 
+        """
         if (started):
             # Second monitor is to soak up and print OTP's STDOUT
             self.monitor = threading.Thread(target = self.monitor_otp, args = (
@@ -453,6 +474,7 @@ class OTPManager(object):
             ))
             self.monitor.start()
             return True
+        """
 
         return False
 
