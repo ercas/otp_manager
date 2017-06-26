@@ -19,6 +19,10 @@ DEFAULT_PORT_ALLOCATION_RANGE = range(8100, 8200)
 # Characters to be replaced by "_"
 ILLEGAL_CHARACTERS = ["(", ")", "?"]
 
+# Name of the file to be stored in each graph directory containing info about
+# otpmanager's build progress
+CONFIG_FILENAME = "otpmanager.json"
+
 DEFAULT_PORT = 8080
 DEFAULT_SECURE_PORT = 8081
 
@@ -161,14 +165,10 @@ class OTPManager(object):
             True if OTP is started up successfully; False if not.
         """
 
-        downloaded_gtfs = "%s/%s/downloaded_gtfs" % (self.graph_root_dir,
-                                                     self.graph_name)
-        downloaded_osm = "%s/%s/downloaded_osm" % (self.graph_root_dir,
-                                                    self.graph_name)
-        built_graph = "%s/%s/built_graph" % (self.graph_root_dir,
-                                             self.graph_name)
         output_dir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
+        config_path = "%s/%s" % (output_dir, CONFIG_FILENAME)
 
+        # Sanity checks and setup
         if (not os.path.isfile(self.otp_path)):
             print("Could not find OTP")
             return False
@@ -177,15 +177,26 @@ class OTPManager(object):
         if (not os.path.exists(output_dir)):
             os.mkdir(output_dir)
 
+        # Config loading
+        config = {
+            "osm_download_time": False,
+            "gtfs_download_time": False,
+            "graph_build_time": False
+        }
+        if (os.path.exists(config_path)):
+            with open(config_path, "r") as f:
+                config = json.load(f)
+
         atexit.register(self.stop_otp)
 
         print_wide("Downloading OSM from Overpass API")
-        if (not os.path.exists(downloaded_osm)):
+        if (not config["osm_download_time"]):
             if (self.download_osm(output_dir,
                                   ways_only = ways_only,
                                   min_size = min_osm_size)):
-                with open(downloaded_osm, "w") as f:
-                    pass
+                config["osm_download_time"] = datetime.datetime.now().isoformat()
+                with open(config_path, "w") as f:
+                    json.dump(config, f)
             else:
                 print("OSM downloading failed")
                 return False
@@ -193,10 +204,11 @@ class OTPManager(object):
             print("OSM already downloaded")
 
         print_wide("Downloading GTFS feeds")
-        if (not os.path.exists(downloaded_gtfs)):
+        if (not config["gtfs_download_time"]):
             if (self.download_gtfs(output_dir)):
-                with open(downloaded_gtfs, "w") as f:
-                    pass
+                config["gtfs_download_time"] = datetime.datetime.now().isoformat()
+                with open(config_path, "w") as f:
+                    json.dump(config, f)
             else:
                 print("GTFS downloading failed")
                 if (require_gtfs):
@@ -205,20 +217,19 @@ class OTPManager(object):
                     print("Resuming anyway")
         else:
             print("GTFS already downloaded")
-
         print("")
 
         print_wide("Building graph")
-        if (not os.path.exists(built_graph)):
+        if (not config["graph_build_time"]):
             if (self.build_graph(output_dir)):
-                with open(built_graph, "w") as f:
-                    pass
+                config["graph_build_time"] = datetime.datetime.now().isoformat()
+                with open(config_path, "w") as f:
+                    json.dump(config, f)
             else:
                 print("Graph building failed")
                 return False
         else:
             print("Graph already built")
-
         print("")
 
         print_wide("Starting OTP")
@@ -230,8 +241,7 @@ class OTPManager(object):
                 return True
             else:
                 print("Could not start OTP")
-
-        print("\nNot using OTP")
+        print("\nFailed to start OTP")
         return False
 
     def monitor_otp(self, listeners = [], show_output = True,
@@ -458,8 +468,8 @@ class OTPManager(object):
             }
         ], timeout = False)
 
-        """
         if (started):
+            """
             # Second monitor is to soak up and print OTP's STDOUT
             self.monitor = threading.Thread(target = self.monitor_otp, args = (
                 [
@@ -473,8 +483,8 @@ class OTPManager(object):
                 False # timeout
             ))
             self.monitor.start()
+            """
             return True
-        """
 
         return False
 
