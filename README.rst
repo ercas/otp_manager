@@ -27,7 +27,7 @@ OTPManager's functionality includes:
   obscure error with the `GeoTools <http://www.geotools.org/>`_ library when
   building the graph.
 
-Simple usage, paired with `route_distances`:
+Simple usage, paired with ``route_distances``:
 
 .. code-block:: python
 
@@ -54,10 +54,10 @@ By default, OTPManager.start() downloads an OSM file containing only nodes used
 in ways (no points of interest), and considers a download "failed" if it its
 size is less than 10kb. This is because the Overpass API will return a valid
 file containing only an error message and no OSM contents if an API call fails.
-This behaviour can be toggled by passing `ways_only = False` and `min_osm_size
-= NUMBER` to OTPManager.start().
+This behaviour can be toggled by passing ``ways_only = False`` and ``min_osm_size
+= NUMBER`` to OTPManager.start().
 
-Note that this is in contrast to `otpmanager.bbox_dl.overpass_dl()`'s default
+Note that this is in contrast to ``otpmanager.bbox_dl.overpass_dl()``'s default
 behaviour when run on its own, which is to download everything within a
 bounding box. For large routing operations, this is not possible because of
 the amount of data in a bounding box may exceed what the Overpass API can
