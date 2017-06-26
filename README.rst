@@ -26,6 +26,13 @@ OTPManager's functionality includes:
 * OpenJDK 8 JRE must be used instead of OpenJDK 9 JRE. OpenJDK 9 produces an
   obscure error with the `GeoTools <http://www.geotools.org/>`_ library when
   building the graph.
+* As of commit ``5c31ab1``, otpmanager creates ``otpmanager*.log`` files during
+  runtime. It is important to not remove these files while otpmanager is
+  running because these files are how otpmanager checks the status of the
+  running OTP instance. otpmanager previously read directly from the OTP
+  process's standard streams via ``subprocess.PIPE``, but this created a race
+  condition where the pipe had the potential to deadlock if OTP wrote data
+  faster than the monitor process could consume it.
 
 Simple usage, paired with ``route_distances``:
 
