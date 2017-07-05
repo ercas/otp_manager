@@ -98,6 +98,8 @@ class OTPManager(object):
     Attributes:
         graph_name: A string containing the name of the graph being worked
             on.
+        using_gtfs: A bool describing whether or not GTFS feeds have been
+            loaded. If require_gtfs is specified, this will always be True.
         bbox: A tuple containing the leftmost, bottommost, rightmost, and
             topmost coordinates.
         otp: The process running OpenTripPlanner, if self.start runs and
@@ -129,6 +131,7 @@ class OTPManager(object):
 
         self.graph_root_dir = remove_illegal_characters(graph_root_dir)
         self.graph_name = remove_illegal_characters(graph_name)
+        self.using_gtfs = False
         self.bbox = (left, bottom, right, top)
         self.otp_path = otp_path
 
@@ -206,10 +209,12 @@ class OTPManager(object):
         print_wide("Downloading GTFS feeds")
         if (not config["gtfs_download_time"]):
             if (self.download_gtfs(output_dir)):
+                self.using_gtfs = True
                 config["gtfs_download_time"] = datetime.datetime.now().isoformat()
                 with open(config_path, "w") as f:
                     json.dump(config, f)
             else:
+                self.using_gtfs = False
                 print("GTFS downloading failed")
                 if (require_gtfs):
                     return False
