@@ -138,7 +138,8 @@ class OTPManager(object):
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
               port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
-              ways_only = True, min_osm_size = 10e3, require_gtfs = False):
+              ways_only = True, min_osm_size = 10e3, require_gtfs = False,
+              auto_download_otp = True):
         """ Set up and start up an OTP instance
 
         Downloads the files necessary for and starts up and manages an instance
@@ -160,6 +161,8 @@ class OTPManager(object):
             require_gtfs: A bool that describes if the presence of a GTFS feed
                 is required for OTP to be started. If False, OTP will start even
                 if no GTFS feeds could be found.
+            auto_download_otp: A bool describing if OTP should be downloaded to
+                the otp_path if it cannot be found.
 
         Returns:
             True if OTP is started up successfully; False if not.
@@ -171,7 +174,15 @@ class OTPManager(object):
         # Sanity checks and setup
         if (not os.path.isfile(self.otp_path)):
             print("Could not find OTP")
-            return False
+            if (auto_download_otp):
+                if (not bbox_dl.save_file(
+                    url = "https://repo1.maven.org/maven2/org/opentripplanner"
+                          "/otp/1.1.0/otp-1.1.0-shaded.jar",
+                    output_path = self.otp_path, live_output = True
+                )):
+                    return False
+            else:
+                return False
         if (not os.path.exists(self.graph_root_dir)):
             os.mkdir(self.graph_root_dir)
         if (not os.path.exists(output_dir)):
