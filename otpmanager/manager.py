@@ -407,7 +407,7 @@ class OTPManager(object):
                 "substring": "Exception in thread",
                 "kill_otp": True,
                 "return_value": False,
-                "callback": fp.close()
+                "callback": fp.close
             },
             {
                 "substring": "Graph written",

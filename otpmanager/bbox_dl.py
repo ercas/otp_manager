@@ -34,11 +34,23 @@ def save_file(url, output_path, live_output = True, overwrite = OVERWRITE,
     """
 
     print(url)
+
     try:
         response = requests.get(url, stream = True)
     except:
         print("=> Download failed: %s" % url)
         return False
+
+    if (desired_extension is not None):
+        if (not output_path.endswith(desired_extension)):
+            desired_output_path = "%s.%s" % (
+                output_path, desired_extension
+            )
+            print("%s -> %s" % (
+                output_path, desired_output_path
+            ))
+            output_path = desired_output_path
+
     if (response.status_code == 200):
 
         # urls with a forward slash at the end might not have a valid file name
@@ -79,16 +91,6 @@ def save_file(url, output_path, live_output = True, overwrite = OVERWRITE,
                                                      f.tell()/1024))
                 sys.stdout.flush()
             print("")
-
-            if (desired_extension is not None):
-                if (not output_path.endswith(desired_extension)):
-                    desired_output_path = "%s.%s" % (
-                        output_path, desired_extension
-                    )
-                    print("Renaming: %s -> %s" % (
-                        output_path, desired_output_path
-                    ))
-                    os.rename(output_path, desired_output_path)
 
             return True
         except Exception as err:
@@ -162,10 +164,10 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
                             "output_path": "%s/%s" % (
                                 output_directory,
                                 feed["url"].split("/")[-1]
-                            )
+                            ),
+                            "desired_extension": "zip",
+                            "live_output": False
                         },
-                        "live_output": False,
-                        "desired_extension": "zip"
                     } for feed in data["feeds"]]
 
                     pool = multiprocessing.Pool(THREADS)
