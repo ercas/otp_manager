@@ -166,7 +166,8 @@ def transitland_dl(output_directory, left, bottom, right, top, dryrun = False):
                                 feed["url"].split("/")[-1]
                             ),
                             "desired_extension": "zip",
-                            "live_output": False
+                            "live_output": False,
+                            "overwrite": False
                         },
                     } for feed in data["feeds"]]
 
