@@ -223,7 +223,7 @@ def overpass_dl(output_path, left, bottom, right, top, ways_only = False,
     """
 
     if (ways_only):
-        url = ("https://overpass-api.de/api/interpreter?data=way[\"highway\"]"
+        url = ("http://overpass.osm.rambler.ru/cgi/interpreter?data=way[\"highway\"]"
                "(%f,%f,%f,%f);(._;>;);out;" % (bottom, left, top, right))
     else:
         url = ("https://overpass-api.de/api/map?bbox=%f,%f,%f,%f" % 
