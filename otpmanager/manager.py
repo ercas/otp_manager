@@ -5,10 +5,8 @@ import contextlib
 import datetime
 import json
 import os
-import signal
 import socket
 import subprocess
-import threading
 import time
 
 from . import bbox_dl
@@ -26,20 +24,20 @@ CONFIG_FILENAME = "otpmanager.json"
 DEFAULT_PORT = 8080
 DEFAULT_SECURE_PORT = 8081
 
-# OTP: Directory to store graphs in
+# Directory to store graphs in
 DEFAULT_GRAPH_ROOT_DIR = "graphs/"
 
-# OTP: Location of the OTP jar
-DEFAULT_OTP_PATH = "otp-1.1.0-shaded.jar"
-
-# OTP: How long between STDOUT messages during startup before the OTP is
+# How long between STDOUT messages during startup before the process is
 # considered to be dead
 DEFAULT_TIMEOUT = 600
 
 def log_name(label):
+    """ Create a timestamped log filename given a label """
+
     return "%s_%s.log" % (label, datetime.datetime.now().isoformat())
 
 def remove_illegal_characters(string):
+    """ Remove illegal file path characters from a string """
     for character in ILLEGAL_CHARACTERS:
         string = string.replace(character, "_")
     return string
@@ -63,7 +61,7 @@ def port_available(port):
             return True
 
 def find_ports(port_range, num_ports = 2):
-    """ Find available ports in the PORTS range
+    """ Find available ports in the given range
 
     Args:
         port_range: The range of possible ports to use.
@@ -92,8 +90,9 @@ def print_wide(string, columns = 80, padding = "="):
     before = "%s %s " % (padding * 2, string)
     print("%s%s" % (before, padding * (columns - len(before))))
 
-class OTPManager(object):
-    """ Class responsible for setting up, starting, and stopping OpenTripPlanner
+class JavaManager(object):
+    """ Generic class containing functions to assist in the setting up,
+    starting, and stopping of Java-based routing engines
 
     Attributes:
         graph_name: A string containing the name of the graph being worked
@@ -102,21 +101,19 @@ class OTPManager(object):
             loaded. If require_gtfs is specified, this will always be True.
         bbox: A tuple containing the leftmost, bottommost, rightmost, and
             topmost coordinates.
-        otp: The process running OpenTripPlanner, if self.start runs and
+        proc: The process running the routing engine, if self.start runs and
             succeeds; None otherwise.
-        otp_output: The current file being used to soak up OpenTripPlanner's
-            STDOUT and STDERR, or None if OpenTripPlanner is not currently
-            running.
-        port: The port that OpenTripPlanner is serving HTTP on, if
-            self.start runs and succeeds.
-        secure_port: The port that OpenTripPlanner is serving HTTPS on, if
+        log: The current file being used to soak up the routing engine's STDOUT
+            and STDERR, or None if the routing engine is not currently running.
+        port: The port that the routing engine is serving HTTP on, self.start
+            runs and succeeds.
+        secure_port: The port that the routing engine is serving HTTPS on, if
             self.start runs and succeeds.
     """
 
     def __init__(self, graph_name, left, bottom, right, top,
-                 otp_path = DEFAULT_OTP_PATH,
-                 graph_root_dir = DEFAULT_GRAPH_ROOT_DIR):
-        """ Initializes OTPManager class and returns True if OTP can be used
+                 jar_path, graph_root_dir = DEFAULT_GRAPH_ROOT_DIR):
+        """ Initializes JavaManager class
 
         Args:
             graph_name: The name of the graph, to be stored in GRAPH_ROOT_DIR.
@@ -125,7 +122,7 @@ class OTPManager(object):
             bottom: A floating point of the bottommost coordinate.
             right: A floating point of the rightmost coordinate.
             top: A floating point of the topmost coordinate.
-            otp_path: The path to the OpenTripPlanner jar.
+            jar_path: The path to the routing manager's jar file.
             graph_root_dir: The path to store all graphs in.
         """
 
@@ -133,158 +130,37 @@ class OTPManager(object):
         self.graph_name = remove_illegal_characters(graph_name)
         self.using_gtfs = False
         self.bbox = (left, bottom, right, top)
-        self.otp_path = otp_path
+        self.jar_path = jar_path
 
-        self.otp = None
-        self.otp_output = None
+        self.proc = None
+        self.proc_output = None
 
-    def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
-              dynamically_allocate_ports = True,
-              port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
-              ways_only = True, min_osm_size = 10e3, require_gtfs = False,
-              auto_download_otp = True):
-        """ Set up and start up an OTP instance
-
-        Downloads the files necessary for and starts up and manages an instance
-        of OpenTripPlanner (OTP). OTP will not be launched if an OSM file and at
-        least 1 GTFS feed is retrieved.
-
-        Args:
-            port: The port to serve OTP on.
-            secure_port: The OTP secure port (preferably port + 1).
-            dynamically_allocate_ports: If True, overrides the port and
-                secure_port arguments and instead chooses the first available
-                port from port_allocation_range.
-            port_allocation_range: A list of ports that OTP can use.
-            ways_only: A bool describing whether or not to download an OSM file
-                containing only nodes used in ways, a.k.a no points of interest
-            min_osm_size: A number describing the minimum expected size of an
-                OSM file. The OSM download will be considered failed if the OSM
-                file is less than this many bytes in size.
-            require_gtfs: A bool that describes if the presence of a GTFS feed
-                is required for OTP to be started. If False, OTP will start even
-                if no GTFS feeds could be found.
-            auto_download_otp: A bool describing if OTP should be downloaded to
-                the otp_path if it cannot be found.
-
-        Returns:
-            True if OTP is started up successfully; False if not.
-        """
-
-        output_dir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
-        config_path = "%s/%s" % (output_dir, CONFIG_FILENAME)
-
-        # Sanity checks and setup
-        if (not os.path.isfile(self.otp_path)):
-            print("Could not find OTP")
-            if (auto_download_otp):
-                if (not bbox_dl.save_file(
-                    url = "https://repo1.maven.org/maven2/org/opentripplanner"
-                          "/otp/1.1.0/otp-1.1.0-shaded.jar",
-                    output_path = self.otp_path, live_output = True
-                )):
-                    return False
-            else:
-                return False
-        if (not os.path.exists(self.graph_root_dir)):
-            os.mkdir(self.graph_root_dir)
-        if (not os.path.exists(output_dir)):
-            os.mkdir(output_dir)
-
-        # Config loading
-        config = {
-            "osm_download_time": False,
-            "gtfs_download_time": False,
-            "graph_build_time": False
-        }
-        if (os.path.exists(config_path)):
-            with open(config_path, "r") as f:
-                config = json.load(f)
-
-        atexit.register(self.stop_otp)
-
-        print_wide("Downloading OSM from Overpass API")
-        if (not config["osm_download_time"]):
-            if (self.download_osm(output_dir,
-                                  ways_only = ways_only,
-                                  min_size = min_osm_size)):
-                config["osm_download_time"] = datetime.datetime.now().isoformat()
-                with open(config_path, "w") as f:
-                    json.dump(config, f)
-            else:
-                print("OSM downloading failed")
-                return False
-        else:
-            print("OSM already downloaded")
-
-        print_wide("Downloading GTFS feeds")
-        if (not config["gtfs_download_time"]):
-            if (self.download_gtfs(output_dir)):
-                self.using_gtfs = True
-                config["gtfs_download_time"] = datetime.datetime.now().isoformat()
-                with open(config_path, "w") as f:
-                    json.dump(config, f)
-            else:
-                self.using_gtfs = False
-                print("GTFS downloading failed")
-                if (require_gtfs):
-                    return False
-                else:
-                    print("Resuming anyway")
-        else:
-            print("GTFS already downloaded")
-        print("")
-
-        print_wide("Building graph")
-        if (not config["graph_build_time"]):
-            if (self.build_graph(output_dir)):
-                config["graph_build_time"] = datetime.datetime.now().isoformat()
-                with open(config_path, "w") as f:
-                    json.dump(config, f)
-            else:
-                print("Graph building failed")
-                return False
-        else:
-            print("Graph already built")
-        print("")
-
-        print_wide("Starting OTP")
-        for i in range(3):
-            if (self.start_otp(port, secure_port, dynamically_allocate_ports,
-                                 port_allocation_range)):
-                print("OTP ready on ports %d and %d\n" % (self.port,
-                                                          self.secure_port))
-                return True
-            else:
-                print("Could not start OTP")
-        print("\nFailed to start OTP")
-        return False
-
-    def monitor_otp(self, listeners = [], show_output = True,
+    def monitor_proc(self, listeners = [], show_output = True,
                     timeout = DEFAULT_TIMEOUT):
-        """ Monitor a running OTP process
+        """ Monitor the running process
 
-        Monitor the output of a running OTP process and perform actions if
+        Monitor the output of a running process and perform actions if
         necessary.
 
         Args:
             listeners: A list of dictionaries, structured as such:
                 {
-                    "substring": A substring of OTP output thst triggers this
-                        listener to fire. For example, if substring is
-                        "ERROR", then this listener would fire whenever "ERROR"
-                        appears in the output of OTP.
+                    "substring": A substring that triggers this listener to
+                        fire. For example, if substring is "ERROR", then this
+                        listener would fire whenever "ERROR" appears in the
+                        output of the process.
                     "return_value": The value to be returned when this listener
                         fires.
-                    "kill_otp": A bool telling whether or not to kill the
-                        running OTP instance when this listener fires.
+                    "kill": A bool telling whether or not to kill the process
+                        when this listener fires.
                     "callback": A function that will be fired when this
                         listener fires. (OPTIONAL)
                 }
-            show_output: A bool telling whether or not OTP output should be
+            show_output: A bool telling whether or not output should be
                 written to STDOUT.
-            timeout: OTP will be killed if it produces no output in this amount
-            of time. This can be set to False if there should be no timeout.
+            timeout: The process will be killed if it produces no output in
+                this amount of time. This can be set to False if there should
+                be no timeout.
 
         Returns:
             False on timeout or the value of listener["return_value"]
@@ -294,22 +170,22 @@ class OTPManager(object):
 
         last_activity = time.time()
 
-        with open(self.otp_output, "r") as otp_output:
-            while (self.otp is not None):
+        with open(self.proc_output, "r") as otp_output:
+            while (self.proc is not None):
                 line = otp_output.readline().rstrip()
 
                 if (len(line) > 0):
                     last_activity = time.time()
 
                     if (show_output):
-                        print("OTP: %s" % line)
+                        print(">> %s" % line)
 
                     for listener in listeners:
                         if (listener["substring"] in line):
                             if ("kill_otp" in listener):
                                 if (listener["kill_otp"]):
                                     time.sleep(1)
-                                    self.stop_otp()
+                                    self.terminate()
                             if ("return_value" in listener):
                                 return listener["return_value"]
                             if ("callback" in listener):
@@ -321,7 +197,7 @@ class OTPManager(object):
                         if (time.time() - last_activity > timeout):
                             print("\nKilling OTP; no stdout/stderr activity "
                                   "in last %d seconds" % timeout)
-                            self.stop_otp()
+                            self.terminate()
                             return False
 
                     time.sleep(0.1)
@@ -374,35 +250,172 @@ class OTPManager(object):
 
         return False
 
-    def build_graph(self, output_dir):
-        """ Attempts to build a graph with OTP
+    def terminate(self, *dummy_args, **dummy_kwargs):
+        """ Terminate the running process """
 
-        Attempts to build a graph from the data downloaded by
-        self.download_components
+        if (self.proc is not None):
+            print("Killing process %d" % self.proc.pid)
+            self.proc.kill()
+            self.proc = None
+        else:
+            print("No running process to kill")
+
+class OTPManager(JavaManager):
+
+    def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
+              dynamically_allocate_ports = True,
+              port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
+              ways_only = True, min_osm_size = 10e3, require_gtfs = False,
+              auto_download_otp = True):
+        """ Set up and start up an OTP instance
+
+        Downloads the files necessary for and starts up and manages an instance
+        of OpenTripPlanner (OTP). OTP will not be launched if an OSM file and at
+        least 1 GTFS feed is retrieved.
 
         Args:
-            output_dir: The directory containing the graph data.
+            port: The port to serve OTP on.
+            secure_port: The OTP secure port (preferably port + 1).
+            dynamically_allocate_ports: If True, overrides the port and
+                secure_port arguments and instead chooses the first available
+                port from port_allocation_range.
+            port_allocation_range: A list of ports that OTP can use.
+            ways_only: A bool describing whether or not to download an OSM file
+                containing only nodes used in ways, a.k.a no points of interest
+            min_osm_size: A number describing the minimum expected size of an
+                OSM file. The OSM download will be considered failed if the OSM
+                file is less than this many bytes in size.
+            require_gtfs: A bool that describes if the presence of a GTFS feed
+                is required for OTP to be started. If False, OTP will start even
+                if no GTFS feeds could be found.
+            auto_download_otp: A bool describing if OTP should be downloaded to
+                the otp_path if it cannot be found.
+
+        Returns:
+            True if OTP is started up successfully; False if not.
+        """
+
+        output_dir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
+        config_path = "%s/%s" % (output_dir, CONFIG_FILENAME)
+
+        # Sanity checks and setup
+        if (not os.path.isfile(self.jar_path)):
+            print("Could not find OTP")
+            if (auto_download_otp):
+                if (not bbox_dl.save_file(
+                    url = "https://repo1.maven.org/maven2/org/opentripplanner"
+                          "/otp/1.1.0/otp-1.1.0-shaded.jar",
+                    output_path = self.jar_path, live_output = True
+                )):
+                    return False
+            else:
+                return False
+        if (not os.path.exists(self.graph_root_dir)):
+            os.mkdir(self.graph_root_dir)
+        if (not os.path.exists(output_dir)):
+            os.mkdir(output_dir)
+
+        # Config loading
+        config = {
+            "osm_download_time": False,
+            "gtfs_download_time": False,
+            "graph_build_time": False
+        }
+        if (os.path.exists(config_path)):
+            with open(config_path, "r") as f:
+                config = json.load(f)
+
+        atexit.register(self.terminate)
+
+        print_wide("Downloading OSM from Overpass API")
+        if (not config["osm_download_time"]):
+            if (self.download_osm(
+                output_dir,
+                ways_only = ways_only,
+                min_size = min_osm_size
+            )):
+                config["osm_download_time"] = datetime.datetime.now().isoformat()
+
+                with open(config_path, "w") as f:
+                    json.dump(config, f)
+
+            else:
+                print("OSM downloading failed")
+                return False
+        else:
+            print("OSM already downloaded")
+
+        print_wide("Downloading GTFS feeds")
+        if (not config["gtfs_download_time"]):
+            if (self.download_gtfs(output_dir)):
+                self.using_gtfs = True
+                config["gtfs_download_time"] = datetime.datetime.now().isoformat()
+
+                with open(config_path, "w") as f:
+                    json.dump(config, f)
+
+            else:
+                self.using_gtfs = False
+                print("GTFS downloading failed")
+
+                if (require_gtfs):
+                    return False
+                else:
+                    print("Resuming anyway")
+        else:
+            print("GTFS already downloaded")
+        print("")
+
+        print_wide("Building graph")
+        if (not config["graph_build_time"]):
+            if (self.build_graph()):
+                config["graph_build_time"] = datetime.datetime.now().isoformat()
+                with open(config_path, "w") as f:
+                    json.dump(config, f)
+            else:
+                print("Graph building failed")
+                return False
+        else:
+            print("Graph already built")
+        print("")
+
+        print_wide("Starting OTP")
+        for i in range(3):
+            if (self.start_proc(port, secure_port, dynamically_allocate_ports,
+                                port_allocation_range)):
+                print("OTP ready on ports %d and %d\n" % (self.port,
+                                                          self.secure_port))
+                return True
+            else:
+                print("Could not start OTP")
+        print("\nFailed to start OTP")
+        return False
+
+    def build_graph(self):
+        """ Attempts to build a graph with OTP
+
+        Attempts to build a graph from previously downloaded data
 
         Returns:
             True if successful; False if not.
         """
 
-        self.otp_output = log_name("otpmanager_graph_build")
-        fp = open(self.otp_output, "w")
+        self.proc_output = log_name("otpmanager_graph_build")
+        fp = open(self.proc_output, "w")
 
-        self.otp = subprocess.Popen(
+        self.proc = subprocess.Popen(
             [
-                "java", "-jar", self.otp_path,
+                "java", "-jar", self.jar_path,
                 "--basePath", ".",
-                "--build", output_dir
+                "--build", self.graph_root_dir
             ],
             stdout = fp,
             stderr = fp
         )
 
-        print("OTP PID: %d" % self.otp.pid)
+        print("PID: %d" % self.proc.pid)
 
-        return self.monitor_otp([
+        return self.monitor_proc([
             {
                 "substring": "Exception in thread",
                 "kill_otp": True,
@@ -417,7 +430,7 @@ class OTPManager(object):
             }
         ])
 
-    def start_otp(self, port, secure_port, dynamically_allocate_ports,
+    def start_proc(self, port, secure_port, dynamically_allocate_ports,
                     port_allocation_range):
         """ Attempts to start an OTP instance
 
@@ -450,12 +463,12 @@ class OTPManager(object):
             self.port = port,
             self.secure_port = secure_port
 
-        self.otp_output = log_name("otpmanager")
-        fp = open(self.otp_output, "w")
+        self.proc_output = log_name("otpmanager")
+        fp = open(self.proc_output, "w")
 
-        self.otp = subprocess.Popen(
+        self.proc = subprocess.Popen(
             [
-                "java", "-jar", self.otp_path,
+                "java", "-jar", self.jar_path,
                 "--basePath", ".",
                 "--router", self.graph_name,
                 "--port", str(self.port),
@@ -465,11 +478,11 @@ class OTPManager(object):
             stdout = fp,
             stderr = fp
         )
-        print("OTP PID: %d" % self.otp.pid)
+        print("OTP PID: %d" % self.proc.pid)
 
         # First monitor is to get a return value from OTP and indicate that it
         # started up successfully
-        started = self.monitor_otp([
+        started = self.monitor_proc([
             {
                 "substring": "Exception in thread",
                 "kill_otp": True,
@@ -485,31 +498,7 @@ class OTPManager(object):
         ], timeout = False)
 
         if (started):
-            """
-            # Second monitor is to soak up and print OTP's STDOUT
-            self.monitor = threading.Thread(target = self.monitor_otp, args = (
-                [
-                    {
-                        "substring": "Exception in thread",
-                        "kill_otp": True,
-                        "return_value": False
-                    }
-                ],
-                True, # show_output
-                False # timeout
-            ))
-            self.monitor.start()
-            """
             return True
-
-        return False
-
-    def stop_otp(self, *dummy_args, **dummy_kwargs):
-        """ Stop the running OTP instance """
-
-        if (self.otp is not None):
-            print("Killing OTP process %d" % self.otp.pid)
-            self.otp.kill()
-            self.otp = None
         else:
-            print("No running OTP process to kill")
+            return False
+
