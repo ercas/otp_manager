@@ -134,6 +134,13 @@ class JavaManager(object):
 
         self.proc = None
         self.proc_output = None
+        self.graph_subdir = None
+        self.graph_config_path = None
+        self.graph_config = None
+
+    def write_config(self):
+        with open(self.graph_config_path, "w") as f:
+            json.dump(self.graph_config, f)
 
     def monitor_proc(self, listeners = [], show_output = True,
                     timeout = DEFAULT_TIMEOUT):
@@ -260,13 +267,86 @@ class JavaManager(object):
         else:
             print("No running process to kill")
 
+    def setup_graph_init(self):
+        """ Stage 1 of setup: create graph subdirectories and config file
+
+        Returns:
+            True on successful completion
+        """
+
+        self.graph_subdir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
+
+        if (not os.path.exists(self.graph_root_dir)):
+            os.mkdir(self.graph_root_dir)
+        if (not os.path.exists(self.graph_subdir)):
+            os.mkdir(self.graph_subdir)
+
+        self.graph_config_path = "%s/%s" % (self.graph_subdir, CONFIG_FILENAME)
+        if (os.path.exists(self.graph_config_path)):
+            with open(self.graph_config_path, "r") as f:
+                self.graph_config = json.load(f)
+        else:
+            self.graph_config = {
+                "osm_download": False,
+                "gtfs_download": False,
+                "graph_build": False
+            }
+
+        return True
+
+    def setup_download_data(self, ways_only, min_osm_size, require_gtfs):
+        """ Stage 2 of setup: download data
+
+        Args:
+            require_gtfs: If True, then returns False if no GTFS files were
+                found
+
+        Returns:
+            True on successful completion
+        """
+
+        print_wide("Downloading OSM from Overpass API")
+        if (not self.graph_config["osm_download_time"]):
+            if (self.download_osm(
+                self.graph_subdir,
+                ways_only = ways_only,
+                min_size = min_osm_size
+            )):
+                self.graph_config["osm_download_time"] = datetime.datetime.now().isoformat()
+                self.update_config()
+            else:
+                print("OSM downloading failed")
+                return False
+        else:
+            print("OSM already downloaded")
+
+        print_wide("Downloading GTFS feeds")
+        if (not self.graph_config["gtfs_download_time"]):
+            if (self.download_gtfs(self.graph_subdir)):
+                self.using_gtfs = True
+                self.graph_config["gtfs_download_time"] = datetime.datetime.now().isoformat()
+                self.update_config()
+            else:
+                self.using_gtfs = False
+                print("GTFS downloading failed")
+
+                if (require_gtfs):
+                    return False
+                else:
+                    print("Resuming anyway")
+        else:
+            print("GTFS already downloaded")
+        print("")
+
+        return True
+
 class OTPManager(JavaManager):
 
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
               port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
               ways_only = True, min_osm_size = 10e3, require_gtfs = False,
-              auto_download_otp = True):
+              auto_download_jar = True):
         """ Set up and start up an OTP instance
 
         Downloads the files necessary for and starts up and manages an instance
@@ -288,20 +368,22 @@ class OTPManager(JavaManager):
             require_gtfs: A bool that describes if the presence of a GTFS feed
                 is required for OTP to be started. If False, OTP will start even
                 if no GTFS feeds could be found.
-            auto_download_otp: A bool describing if OTP should be downloaded to
+            auto_download_jar: A bool describing if OTP should be downloaded to
                 the otp_path if it cannot be found.
 
         Returns:
             True if OTP is started up successfully; False if not.
         """
 
-        output_dir = "%s/%s/" % (self.graph_root_dir, self.graph_name)
-        config_path = "%s/%s" % (output_dir, CONFIG_FILENAME)
+        if (not self.setup_graph_init()):
+            return False
+        if (not self.setup_download_data(ways_only, min_osm_size, require_gtfs)):
+            return False
 
-        # Sanity checks and setup
+        # Download routing engine if it doesn't exist locally
         if (not os.path.isfile(self.jar_path)):
-            print("Could not find OTP")
-            if (auto_download_otp):
+            if (auto_download_jar):
+                print("Downloading routing engine")
                 if (not bbox_dl.save_file(
                     url = "https://repo1.maven.org/maven2/org/opentripplanner"
                           "/otp/1.1.0/otp-1.1.0-shaded.jar",
@@ -309,69 +391,17 @@ class OTPManager(JavaManager):
                 )):
                     return False
             else:
+                print("No routing engine found")
                 return False
-        if (not os.path.exists(self.graph_root_dir)):
-            os.mkdir(self.graph_root_dir)
-        if (not os.path.exists(output_dir)):
-            os.mkdir(output_dir)
-
-        # Config loading
-        config = {
-            "osm_download_time": False,
-            "gtfs_download_time": False,
-            "graph_build_time": False
-        }
-        if (os.path.exists(config_path)):
-            with open(config_path, "r") as f:
-                config = json.load(f)
 
         atexit.register(self.terminate)
 
-        print_wide("Downloading OSM from Overpass API")
-        if (not config["osm_download_time"]):
-            if (self.download_osm(
-                output_dir,
-                ways_only = ways_only,
-                min_size = min_osm_size
-            )):
-                config["osm_download_time"] = datetime.datetime.now().isoformat()
-
-                with open(config_path, "w") as f:
-                    json.dump(config, f)
-
-            else:
-                print("OSM downloading failed")
-                return False
-        else:
-            print("OSM already downloaded")
-
-        print_wide("Downloading GTFS feeds")
-        if (not config["gtfs_download_time"]):
-            if (self.download_gtfs(output_dir)):
-                self.using_gtfs = True
-                config["gtfs_download_time"] = datetime.datetime.now().isoformat()
-
-                with open(config_path, "w") as f:
-                    json.dump(config, f)
-
-            else:
-                self.using_gtfs = False
-                print("GTFS downloading failed")
-
-                if (require_gtfs):
-                    return False
-                else:
-                    print("Resuming anyway")
-        else:
-            print("GTFS already downloaded")
-        print("")
-
+        # Initial graph build
         print_wide("Building graph")
-        if (not config["graph_build_time"]):
+        if (not self.graph_config["graph_build_time"]):
             if (self.build_graph()):
-                config["graph_build_time"] = datetime.datetime.now().isoformat()
-                with open(config_path, "w") as f:
-                    json.dump(config, f)
+                self.graph_config["graph_build_time"] = datetime.datetime.now().isoformat()
+                update_config()
             else:
                 print("Graph building failed")
                 return False
@@ -379,16 +409,17 @@ class OTPManager(JavaManager):
             print("Graph already built")
         print("")
 
-        print_wide("Starting OTP")
+        # Ready
+        print_wide("Starting routing engine")
         for i in range(3):
             if (self.start_proc(port, secure_port, dynamically_allocate_ports,
                                 port_allocation_range)):
-                print("OTP ready on ports %d and %d\n" % (self.port,
+                print("Listening on ports %d and %d\n" % (self.port,
                                                           self.secure_port))
                 return True
             else:
-                print("Could not start OTP")
-        print("\nFailed to start OTP")
+                print("Could not start routing engine")
+        print("\nFailed to start routing engine")
         return False
 
     def build_graph(self):
