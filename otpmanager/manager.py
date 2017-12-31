@@ -340,8 +340,6 @@ class JavaManager(object):
 
         return True
 
-class OTPManager(JavaManager):
-
     def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
               dynamically_allocate_ports = True,
               port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
@@ -375,10 +373,43 @@ class OTPManager(JavaManager):
             True if OTP is started up successfully; False if not.
         """
 
+        # Defined by JavaManager
         if (not self.setup_graph_init()):
             return False
+
+        # Defined by JavaManager
         if (not self.setup_download_data(ways_only, min_osm_size, require_gtfs)):
             return False
+
+        # Defined by individual routing engine managers
+        if (not self.setup_routing_engine(auto_download_jar)):
+            return False
+
+        # Ready
+        print_wide("Starting routing engine")
+        for i in range(3):
+            if (self.start_proc(port, secure_port, dynamically_allocate_ports,
+                                port_allocation_range)):
+                print("Listening on ports %d and %d\n" % (self.port,
+                                                          self.secure_port))
+                return True
+            else:
+                print("Could not start routing engine")
+        print("\nFailed to start routing engine")
+        return False
+
+class OTPManager(JavaManager):
+
+    def setup_routing_engine(self, auto_download_jar):
+        """ Stage 3 of setup: download jar and perform intital graph build
+
+        Args:
+            auto_download_jar: A bool describing if the routing engine should
+                be downloaded if it cannot be found.
+
+        Returns:
+            True on successful completion
+        """
 
         # Download routing engine if it doesn't exist locally
         if (not os.path.isfile(self.jar_path)):
@@ -401,7 +432,7 @@ class OTPManager(JavaManager):
         if (not self.graph_config["graph_build_time"]):
             if (self.build_graph()):
                 self.graph_config["graph_build_time"] = datetime.datetime.now().isoformat()
-                update_config()
+                self.update_config()
             else:
                 print("Graph building failed")
                 return False
@@ -409,18 +440,7 @@ class OTPManager(JavaManager):
             print("Graph already built")
         print("")
 
-        # Ready
-        print_wide("Starting routing engine")
-        for i in range(3):
-            if (self.start_proc(port, secure_port, dynamically_allocate_ports,
-                                port_allocation_range)):
-                print("Listening on ports %d and %d\n" % (self.port,
-                                                          self.secure_port))
-                return True
-            else:
-                print("Could not start routing engine")
-        print("\nFailed to start routing engine")
-        return False
+        return True
 
     def build_graph(self):
         """ Attempts to build a graph with OTP
@@ -438,7 +458,7 @@ class OTPManager(JavaManager):
             [
                 "java", "-jar", self.jar_path,
                 "--basePath", ".",
-                "--build", self.graph_root_dir
+                "--build", self.graph_subdir
             ],
             stdout = fp,
             stderr = fp
