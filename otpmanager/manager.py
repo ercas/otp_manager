@@ -3,11 +3,13 @@
 import atexit
 import contextlib
 import datetime
+import glob
 import json
 import os
 import socket
 import subprocess
 import time
+import zipfile
 
 from . import bbox_dl
 
@@ -22,7 +24,6 @@ ILLEGAL_CHARACTERS = ["(", ")", "?"]
 CONFIG_FILENAME = "otpmanager.json"
 
 DEFAULT_PORT = 8080
-DEFAULT_SECURE_PORT = 8081
 
 # Directory to store graphs in
 DEFAULT_GRAPH_ROOT_DIR = "graphs/"
@@ -107,8 +108,6 @@ class JavaManager(object):
             and STDERR, or None if the routing engine is not currently running.
         port: The port that the routing engine is serving HTTP on, self.start
             runs and succeeds.
-        secure_port: The port that the routing engine is serving HTTPS on, if
-            self.start runs and succeeds.
     """
 
     def __init__(self, graph_name, left, bottom, right, top,
@@ -287,9 +286,10 @@ class JavaManager(object):
                 self.graph_config = json.load(f)
         else:
             self.graph_config = {
-                "osm_download": False,
-                "gtfs_download": False,
-                "graph_build": False
+                "osm_download_time": False,
+                "gtfs_download_time": False,
+                "otp_graph_build_time": False,
+                "gh_graph_build_time": False
             }
 
         return True
@@ -313,7 +313,7 @@ class JavaManager(object):
                 min_size = min_osm_size
             )):
                 self.graph_config["osm_download_time"] = datetime.datetime.now().isoformat()
-                self.update_config()
+                self.write_config()
             else:
                 print("OSM downloading failed")
                 return False
@@ -325,7 +325,7 @@ class JavaManager(object):
             if (self.download_gtfs(self.graph_subdir)):
                 self.using_gtfs = True
                 self.graph_config["gtfs_download_time"] = datetime.datetime.now().isoformat()
-                self.update_config()
+                self.write_config()
             else:
                 self.using_gtfs = False
                 print("GTFS downloading failed")
@@ -340,8 +340,7 @@ class JavaManager(object):
 
         return True
 
-    def start(self, port = DEFAULT_PORT, secure_port = DEFAULT_SECURE_PORT,
-              dynamically_allocate_ports = True,
+    def start(self, port = DEFAULT_PORT, dynamically_allocate_ports = True,
               port_allocation_range = DEFAULT_PORT_ALLOCATION_RANGE,
               ways_only = True, min_osm_size = 10e3, require_gtfs = False,
               auto_download_jar = True):
@@ -353,10 +352,9 @@ class JavaManager(object):
 
         Args:
             port: The port to serve OTP on.
-            secure_port: The OTP secure port (preferably port + 1).
-            dynamically_allocate_ports: If True, overrides the port and
-                secure_port arguments and instead chooses the first available
-                port from port_allocation_range.
+            dynamically_allocate_ports: If True, overrides the port
+                argument and instead chooses the first available port from
+                port_allocation_range.
             port_allocation_range: A list of ports that OTP can use.
             ways_only: A bool describing whether or not to download an OSM file
                 containing only nodes used in ways, a.k.a no points of interest
@@ -381,6 +379,8 @@ class JavaManager(object):
         if (not self.setup_download_data(ways_only, min_osm_size, require_gtfs)):
             return False
 
+        atexit.register(self.terminate)
+
         # Defined by individual routing engine managers
         if (not self.setup_routing_engine(auto_download_jar)):
             return False
@@ -388,10 +388,9 @@ class JavaManager(object):
         # Ready
         print_wide("Starting routing engine")
         for i in range(3):
-            if (self.start_proc(port, secure_port, dynamically_allocate_ports,
+            if (self.start_proc(port, dynamically_allocate_ports,
                                 port_allocation_range)):
-                print("Listening on ports %d and %d\n" % (self.port,
-                                                          self.secure_port))
+                print("Listening on port %d\n" % self.port)
                 return True
             else:
                 print("Could not start routing engine")
@@ -425,14 +424,14 @@ class OTPManager(JavaManager):
                 print("No routing engine found")
                 return False
 
-        atexit.register(self.terminate)
+        return False
 
         # Initial graph build
         print_wide("Building graph")
-        if (not self.graph_config["graph_build_time"]):
+        if (not self.graph_config["otp_graph_build_time"]):
             if (self.build_graph()):
-                self.graph_config["graph_build_time"] = datetime.datetime.now().isoformat()
-                self.update_config()
+                self.graph_config["otp_graph_build_time"] = datetime.datetime.now().isoformat()
+                self.write_config()
             else:
                 print("Graph building failed")
                 return False
@@ -481,7 +480,7 @@ class OTPManager(JavaManager):
             }
         ])
 
-    def start_proc(self, port, secure_port, dynamically_allocate_ports,
+    def start_proc(self, port, dynamically_allocate_ports,
                     port_allocation_range):
         """ Attempts to start an OTP instance
 
@@ -490,10 +489,9 @@ class OTPManager(JavaManager):
 
         Args:
             port: The port to serve OTP on.
-            secure_port: The OTP secure port (preferably port + 1).
-            dynamically_allocate_ports: If True, overrides the port and
-                secure_port arguments and instead chooses the first available
-                port from port_allocation_range.
+            dynamically_allocate_ports: If True, overrides the port
+                argument and instead chooses the first available port from
+                port_allocation_range.
             port_allocation_range: A list of ports that OTP can use.
 
         Returns:
@@ -504,7 +502,6 @@ class OTPManager(JavaManager):
             ports = find_ports(port_allocation_range, 2)
             if (ports):
                 self.port = ports[0]
-                self.secure_port = ports[1]
             else:
                 print("No ports between %d and %d are available." % (
                     port_allocation_range[0], port_allocation_range[-1]
@@ -512,7 +509,6 @@ class OTPManager(JavaManager):
                 return False
         else:
             self.port = port,
-            self.secure_port = secure_port
 
         self.proc_output = log_name("otpmanager")
         fp = open(self.proc_output, "w")
@@ -523,7 +519,7 @@ class OTPManager(JavaManager):
                 "--basePath", ".",
                 "--router", self.graph_name,
                 "--port", str(self.port),
-                "--securePort", str(self.secure_port),
+                "--securePort", str(ports[1]),
                 "--inMemory"
             ],
             stdout = fp,
@@ -531,9 +527,7 @@ class OTPManager(JavaManager):
         )
         print("OTP PID: %d" % self.proc.pid)
 
-        # First monitor is to get a return value from OTP and indicate that it
-        # started up successfully
-        started = self.monitor_proc([
+        return self.monitor_proc([
             {
                 "substring": "Exception in thread",
                 "kill_otp": True,
@@ -548,8 +542,154 @@ class OTPManager(JavaManager):
             }
         ], timeout = False)
 
-        if (started):
-            return True
+class GraphHopperManager(JavaManager):
+
+    def setup_routing_engine(self, auto_download_jar):
+        """ Stage 3 of setup: download jar and perform intital graph build
+
+        Args:
+            auto_download_jar: A bool describing if the routing engine should
+                be downloaded if it cannot be found.
+
+        Returns:
+            True on successful completion
+        """
+
+        # Download routing engine if it doesn't exist locally
+        if (not os.path.isdir(self.jar_path)):
+            if (auto_download_jar):
+                out_zip = "graphhopper-web-0.9.0-bin.zip"
+
+                print("Downloading routing engine")
+                if (not bbox_dl.save_file(
+                    url = "https://graphhopper.com/public/releases/graphhopper-web-0.9.0-bin.zip",
+                    output_path = out_zip, live_output = True
+                )):
+                    return False
+
+                print("Unpacking routing engine")
+                os.mkdir(self.jar_path)
+                with zipfile.ZipFile(out_zip, "r") as z:
+                    z.extractall(self.jar_path)
+                os.remove(out_zip)
+            else:
+                print("No routing engine found")
+                return False
+
+        # Initial graph build
+        print_wide("Building graph")
+        if (not self.graph_config["gh_graph_build_time"]):
+            if (self.build_graph()):
+                self.graph_config["gh_graph_build_time"] = datetime.datetime.now().isoformat()
+                self.write_config()
+            else:
+                print("Graph building failed")
+                return False
         else:
-            return False
+            print("Graph already built")
+        print("")
+
+        return True
+
+    def build_gh_startup_args(self, port = None):
+        args = [
+            "java", "-jar", glob.glob("%s/*.jar" % self.jar_path)[0],
+            "jetty.resourcebase=%s/webapp" % self.jar_path,
+            "config=%s/config-example.properties" % self.jar_path,
+            "datareader.file=" + glob.glob("%s/*.osm" % self.graph_subdir)[0],
+            "graph.flag_encoders=car,foot,bike"
+        ]
+        if (port):
+            args.append("jetty.port=%d" % port)
+        return args
+
+    def build_graph(self):
+        """ Attempts to build a graph with OTP
+
+        Attempts to build a graph from previously downloaded data
+
+        Returns:
+            True if successful; False if not.
+        """
+
+        self.proc_output = log_name("otpmanager_graph_build")
+        fp = open(self.proc_output, "w")
+
+        self.proc = subprocess.Popen(
+            self.build_gh_startup_args(),
+            stdout = fp,
+            stderr = fp
+        )
+
+        print("PID: %d" % self.proc.pid)
+
+        return self.monitor_proc([
+            {
+                "substring": "Exception in thread",
+                "kill_otp": True,
+                "return_value": False,
+                "callback": fp.close
+            },
+            {
+                "substring": "loaded graph",
+                "kill_otp": True,
+                "return_value": True,
+                "callback": fp.close
+            }
+        ])
+
+    def start_proc(self, port, dynamically_allocate_ports,
+                    port_allocation_range):
+        """ Attempts to start a GraphHopper instance
+
+        Attempts to start up a GraphHopper instance, using the graph built by
+        self.build_graph.
+
+        Args:
+            port: The port to serve OTP on.
+            dynamically_allocate_ports: If True, overrides the port argument
+                and instead chooses the first available port from
+                port_allocation_range.
+            port_allocation_range: A list of ports that OTP can use.
+
+        Returns:
+            True if OTP was succesfully started; False otherwise.
+        """
+
+        if (dynamically_allocate_ports):
+            ports = find_ports(port_allocation_range, 2)
+            if (ports):
+                self.port = ports[0]
+            else:
+                print("No ports between %d and %d are available." % (
+                    port_allocation_range[0], port_allocation_range[-1]
+                ))
+                return False
+        else:
+            self.port = port,
+
+        self.proc_output = log_name("otpmanager")
+        fp = open(self.proc_output, "w")
+
+        self.proc = subprocess.Popen(
+            self.build_gh_startup_args(self.port),
+            stdout = fp,
+            stderr = fp
+        )
+        print("GraphHopper PID: %d" % self.proc.pid)
+
+        return self.monitor_proc([
+            {
+                "substring": "Exception in thread",
+                "kill_otp": True,
+                "return_value": False,
+                "callback": fp.close
+            },
+            {
+                "substring": "Started server at HTTP",
+                "kill_otp": False,
+                "return_value": True,
+                "callback": fp.close
+            }
+        ], timeout = False)
 

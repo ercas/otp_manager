@@ -43,7 +43,7 @@ Simple usage, paired with ``route_distances``:
 
     manager = otpmanager.OTPManager(
         "boston", -71.191155, 42.227926, -70.748802, 42.400819999999996,
-        otp_path = "/home/user/otp-1.1.0-shaded.jar"
+        otp_path = "./otp-1.1.0-shaded.jar"
     )
     manager.start()
 
@@ -53,7 +53,19 @@ Simple usage, paired with ``route_distances``:
     router = route_distances.OTPDistances("localhost:%d" % manager.port)
     print(router.route(-71.08930, 42.33877, -71.07743, 42.34954, "walk"))
 
-    manager.stop_otp()
+    manager.terminate()
+
+    # We can also use GraphHopper
+    manager = otpmanager.GraphHopperManager(
+        "boston", -71.191155, 42.227926, -70.748802, 42.400819999999996,
+        otp_path = "./otp-1.1.0-shaded.jar"
+    )
+    manager.start()
+
+    router = route_distances.GraphHopperDistances("localhost:%d" % manager.port)
+    print(router.route(-71.08930, 42.33877, -71.07743, 42.34954, "walk"))
+
+    manager.terminate()
 
 ..
 

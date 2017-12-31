@@ -1,1 +1,1 @@
-from .manager import OTPManager
+from .manager import OTPManager, GraphHopperManager, JavaManager
