@@ -1,6 +1,9 @@
 otpmanager
 ===========
 
+.. image:: https://zenodo.org/badge/90059946.svg
+   :target: https://zenodo.org/badge/latestdoi/90059946
+
 ``otpmanager`` provides the ``OTPManager`` class that manages the setup,
 startup, and monitoring of an `OpenTripPlanner
 <http://www.opentripplanner.org/>`_ (OTP) instance. This is meant to be used in
